@@ -128,10 +128,11 @@ CANARD_PRIVATE TransferCRC crcAddByte(const TransferCRC crc, const uint8_t byte)
 #endif
 }
 
-CANARD_PRIVATE TransferCRC crcAdd(const TransferCRC crc, const size_t size, const void* const data)
+// CANARD_PRIVATE TransferCRC crcAdd(const TransferCRC crc, const size_t size, const void* const data)
+uint16_t crcAdd(const uint16_t crc, const size_t size, const void* const data)
 {
     CANARD_ASSERT((data != NULL) || (size == 0U));
-    TransferCRC    out = crc;
+    uint16_t    out = crc;
     const uint8_t* p   = (const uint8_t*) data;
     for (size_t i = 0; i < size; i++)
     {

@@ -693,6 +693,9 @@ CanardFilter canardMakeFilterForServices(const CanardNodeID local_node_id);
 /// in the Transport Layer chapter of the Cyphal specification.
 CanardFilter canardConsolidateFilters(const CanardFilter* const a, const CanardFilter* const b);
 
+// Ajout de la fonction CRCadd pour pouvoir l'utiliser dans les fonctions
+uint16_t crcAdd(const uint16_t crc, const size_t size, const void* const data);
+
 #ifdef __cplusplus
 }
 #endif
