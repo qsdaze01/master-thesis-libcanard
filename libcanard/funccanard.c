@@ -104,7 +104,7 @@ uint8_t removeStuffedBits(uint8_t* buffer_in, uint8_t* buffer_out, uint8_t buffe
     DEL : 1 bit Recessive
     EOF : 7 bits Recessive
 */
-void serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, uint8_t RTR, uint8_t* buffer) {
+uint8_t serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, uint8_t RTR, uint8_t* buffer) {
     uint8_t buffer_size = 44 + payload_size*8;
     uint16_t CRC;
 
@@ -157,6 +157,7 @@ void serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, uin
     for (int i = 0; i < 3; i++){
         buffer[44 + 8*payload_size + i] = 1;
     }
+    return 0;
 }
 
 uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_size){
@@ -178,13 +179,33 @@ uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_s
     }
 
     if (!(CRC_computed == CRC_received || CRC_computed - pow(2,15) == CRC_received)) {
-        printf("error \n");
-        return -1;
+        printf("Error : CRC not equal, frame wrong \n");
+        return 1;
     }
     return 0;
 }
 
-int pleaseTransmit(CanardTxQueueItem* ti, CanardTransferMetadata transfer_metadata) {
+uint8_t errorStuffedBits(uint8_t* buffer, uint8_t buffer_size) {
+    uint8_t counter_1 = 0;
+    uint8_t counter_0 = 0;
+    for (int i = 0; i < buffer_size; i++) {
+        if (buffer[i] == 0) {
+            counter_1 = 0;
+            counter_0++;
+        } 
+        if (buffer[i] == 1) {
+            counter_0 = 0;
+            counter_1++;
+        }
+        if (counter_0 > 5, counter_1 > 5) {
+            printf("Error : more than 5 following same bits \n");
+            return 1;
+        }
+    }
+    return 0;
+}
+
+uint8_t pleaseTransmit(CanardTxQueueItem* ti, CanardTransferMetadata transfer_metadata) {
     const uint8_t* payload_data = (const uint8_t*)ti->frame.payload;
     uint8_t buffer_frame[44 + ti->frame.payload_size*8];
 
@@ -197,7 +218,7 @@ int pleaseTransmit(CanardTxQueueItem* ti, CanardTransferMetadata transfer_metada
     return 0;
 }
 
-int transmitFrame(CanardTxQueue queue, CanardInstance canard, uint8_t tx_deadline_usec, uint8_t *my_message_transfer_id, int port_id, int payload_size, char* payload) {
+uint8_t transmitFrame(CanardTxQueue queue, CanardInstance canard, uint8_t tx_deadline_usec, uint8_t *my_message_transfer_id, int port_id, int payload_size, char* payload) {
     const CanardTransferMetadata transfer_metadata = {
         .priority       = CanardPriorityNominal,
         .transfer_kind  = CanardTransferKindMessage,
