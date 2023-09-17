@@ -34,7 +34,7 @@ uint16_t computeCRC(int payload_size, uint8_t * buffer_frame) {
     return CRC;
 }
 
-uint8_t instertStuffedBits (uint8_t* buffer_in, uint8_t* buffer_out, uint8_t payload_size) {
+uint8_t insertStuffedBits (uint8_t* buffer_in, uint8_t* buffer_out, uint8_t payload_size) {
     uint8_t nb_stuffed_bits = 0;
     uint8_t count_successive_1 = 0;
     uint8_t count_successive_0 = 0;
@@ -185,16 +185,15 @@ uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_s
 }
 
 int pleaseTransmit(CanardTxQueueItem* ti, CanardTransferMetadata transfer_metadata) {
-    printf("Size : %ld \n", ti->frame.payload_size);
-    
     const uint8_t* payload_data = (const uint8_t*)ti->frame.payload;
+    uint8_t buffer_frame[44 + ti->frame.payload_size*8];
 
-    for (size_t i = 0; i < ti->frame.payload_size; i++) {
-        printf("%02X \n", payload_data[i]);
-    }
-    printf("\n");
+    serializeFrame(ti->frame.payload_size, payload_data, transfer_metadata.port_id, 1, buffer_frame);
 
-    printf("OK \n");
+    uint8_t buffer_stuffed[44 + ti->frame.payload_size*8 + 21];
+    uint8_t stuffed_bits = insertStuffedBits(buffer_frame, buffer_stuffed, ti->frame.payload_size);
+    uint8_t frame_len = 44 + ti->frame.payload_size*8 + stuffed_bits;
+
     return 0;
 }
 
