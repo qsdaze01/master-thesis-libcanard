@@ -253,3 +253,31 @@ uint8_t transmitFrame(CanardTxQueue queue, CanardInstance canard, uint8_t tx_dea
     }
     return 0;
 }
+
+uint8_t genFrames(uint64_t nb_frames, CanardTxQueue queue, CanardInstance canard) {
+    srand(42);
+    uint16_t identifier;
+    uint8_t data_len;
+    if (nb_frames == 0) {
+        while(1) {
+            identifier = rand()%2048;
+            data_len = rand()%8;
+            uint8_t payload[data_len];
+            for (int j = 0; j < data_len; j++) {
+                payload[j] = rand()%256;
+            }
+            transmitFrame(queue, canard, 0, 1234, identifier, data_len, payload);
+        }
+    } else {
+        for (int i = 0; i < nb_frames; i++) {
+            identifier = rand()%2048;
+            data_len = rand()%8;
+            uint8_t payload[data_len];
+            for (int j = 0; j < data_len; j++) {
+                payload[j] = rand()%256;
+            }
+            transmitFrame(queue, canard, 0, 1234, identifier, data_len, payload);
+        }
+    }
+    return 0;
+}
