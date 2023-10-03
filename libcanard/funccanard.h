@@ -8,7 +8,7 @@ void memFree(CanardInstance* const canard, void* const pointer);
 
 uint8_t serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, uint8_t RTR, uint8_t* buffer);
 
-uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_size);
+uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_size, uint64_t* data);
 
 uint8_t insertStuffedBits (uint8_t* buffer_in, uint8_t* buffer_out, uint8_t payload_size);
 
@@ -19,3 +19,5 @@ uint8_t pleaseTransmit(CanardTxQueueItem* ti, CanardTransferMetadata transfer_me
 uint8_t transmitFrame(CanardTxQueue queue, CanardInstance canard, uint8_t tx_deadline_usec, uint8_t *my_message_transfer_id, int port_id, int payload_size, char* payload);
 
 uint8_t genFrames(uint64_t nb_frames, CanardTxQueue queue, CanardInstance canard);
+
+uint16_t computeCRC(int payload_size, uint8_t * buffer_frame);

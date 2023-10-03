@@ -2,6 +2,17 @@
 #include <stdlib.h>
 #include "canard.h"
 #include <math.h>
+#include "bitlevel.h"
+
+uint16_t TEC = 0;
+uint16_t REC = 0; 
+/*
+    BUS STATE : 
+    0 : Error active
+    1 : Error passive 
+    2 : Bus off
+*/
+uint8_t bus_state = 0;  
 
 void* memAllocate(CanardInstance* const canard, const size_t amount)
 {
@@ -160,7 +171,7 @@ uint8_t serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, 
     return 0;
 }
 
-uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_size){
+uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_size, uint64_t* data){
     uint8_t payload_size = (buffer_size - 44)/8;
     uint16_t CRC_computed = computeCRC(payload_size, buffer);
 
@@ -168,9 +179,9 @@ uint8_t deserializeFrame(uint8_t *buffer, uint16_t* identifier, uint8_t buffer_s
         *identifier += buffer[1 + i]*pow(2,10-i);
     }
 
-    uint64_t data = 0;
+    *data = 0;
     for (int i = 0; i < 8*payload_size; i++){
-        data += buffer[19 + i]*pow(2,10-i);
+        *data += buffer[19 + i]*pow(2,10-i);
     }
 
     uint16_t CRC_received = 0;
@@ -197,10 +208,26 @@ uint8_t errorStuffedBits(uint8_t* buffer, uint8_t buffer_size) {
             counter_0 = 0;
             counter_1++;
         }
-        if (counter_0 > 5, counter_1 > 5) {
+        if (counter_0 > 5 || counter_1 > 5) {
             printf("Error : more than 5 following same bits \n");
             return 1;
         }
+    }
+    return 0;
+}
+
+uint8_t updateBusState (uint8_t errorTransmitterFlag, uint8_t errorReceiverFlag) {
+    if (bus_state == 0 && TEC >= 128 && REC >= 128) {
+        bus_state = 1;
+    } 
+    if (bus_state == 1 && TEC < 128 && REC < 128) {
+        bus_state = 0;
+    }
+    if (bus_state == 1 && TEC > 256) {
+        bus_state = 2;
+    } 
+    if (bus_state == 2 && TEC == 0 && REC == 0) {
+        bus_state = 0;
     }
     return 0;
 }
@@ -214,6 +241,20 @@ uint8_t pleaseTransmit(CanardTxQueueItem* ti, CanardTransferMetadata transfer_me
     uint8_t buffer_stuffed[44 + ti->frame.payload_size*8 + 21];
     uint8_t stuffed_bits = insertStuffedBits(buffer_frame, buffer_stuffed, ti->frame.payload_size);
     uint8_t frame_len = 44 + ti->frame.payload_size*8 + stuffed_bits;
+
+    uint8_t overloadFlag = 0;
+    uint8_t errorTransmitterFlag = 0;
+    uint8_t errorReceiverFlag = 0;
+    while (transmitOnBus(buffer_stuffed, frame_len, ti->frame.payload_size, &overloadFlag, &errorTransmitterFlag, &errorReceiverFlag) != 0) {
+        updateBusState(errorTransmitterFlag, errorReceiverFlag);
+        if (bus_state == 2) {
+            return 1;
+        }
+        /* AJOUTER LA GESTION DES OVERLOAD FRAMES */
+    }
+
+    if (TEC != 0)
+        TEC--;
 
     return 0;
 }
@@ -251,6 +292,57 @@ uint8_t transmitFrame(CanardTxQueue queue, CanardInstance canard, uint8_t tx_dea
         // After the frame is transmitted or if it has timed out while waiting, pop it from the queue and deallocate:
         canard.memory_free(&canard, canardTxPop(&queue, ti));
     }
+    return 0;
+}
+
+uint8_t alignPayload(uint64_t data, uint8_t* payload, uint8_t payload_size) {
+    int i = 0;
+    uint8_t temp_payload[payload_size*8];
+    while (data > 0) {
+        temp_payload[i] = data%2;
+        data = data/2;
+        i++;
+    }
+    for (int j = payload_size-1; j >= 0; j--) {
+        for (int k = 0; k < 8; k++) {
+            payload[k] += temp_payload[j*8 + k]*pow(2,k);
+        }
+    }
+    return 0;
+}
+
+uint8_t receiveFrame (uint16_t* identifier, uint8_t* payload, uint8_t* payload_size) {
+    int buffer_size = 44 + 8*8 + 21;
+    uint8_t buffer[buffer_size];
+    uint8_t nbStuffedBits = 0;
+    uint8_t overloadFlag = 0;
+    uint8_t errorTransmitterFlag = 0;
+    uint8_t errorReceiverFlag = 0;
+
+    readFrameOnBus(buffer, buffer_size, payload_size, &nbStuffedBits, &overloadFlag, &errorTransmitterFlag, &errorReceiverFlag);
+    
+    uint8_t buffer_out[44 + *payload_size*8];
+    removeStuffedBits(buffer, buffer_out, 44+*payload_size*8+nbStuffedBits);
+
+    uint64_t data;
+    deserializeFrame(buffer_out, identifier, 44 + *payload_size*8, &data);
+
+    alignPayload(&data, payload, *payload_size);
+
+    return 0;
+}
+
+uint8_t receiveMode(uint8_t stopCondition) {
+    uint16_t identifier;
+    uint8_t* payload;
+    uint8_t payload_size;
+    while (stopCondition) {
+        receiveFrame(&identifier, &payload, &payload_size);
+        /* 
+            Do something
+        */
+    }
+
     return 0;
 }
 
