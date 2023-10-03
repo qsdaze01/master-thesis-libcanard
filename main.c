@@ -58,5 +58,7 @@ int main() {
 
     //transmitFrame(queue, canard, tx_deadline_usec, &my_message_transfer_id, 1234, 11, payload2);
     
+    receiveMode(1);
+
     return 0;
 }

@@ -576,7 +576,7 @@ uint8_t sendACK(uint8_t* buffer, int buffer_size, int index, int limit, clock_t 
 }
 
 uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size, uint8_t* nbStuffedBits, uint8_t* overloadFlag, uint8_t* errorTransmitterFlag, uint8_t* errorReceiverFlag) {
-    int index = 0;
+    int index = 1;
     *nbStuffedBits = 0;
     uint8_t lastNbStuffedBits = 0;
     clock_t startBit;
@@ -586,12 +586,16 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
         bufferStart[i] = 0;
     }
     
+    printf("Begin reading \n");
     while(readStartFrame()) {
         startBit = clock();
         while (endTimeBit(startBit)) {
             continue;
         }
     }
+    buffer[0] = 0;
+
+    printf("Start frame \n");
 
     /* First part */
     int limit_first_part = 15 + *nbStuffedBits;
@@ -628,6 +632,8 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
             busAtOne = 1;
         }
     }
+
+    printf("First part done \n");
 
     for (int i = 0; i < 4; i++) {
         bufferDLC[i] = 0;

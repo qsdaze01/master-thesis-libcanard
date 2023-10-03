@@ -6,6 +6,7 @@
 
 uint16_t TEC = 0;
 uint16_t REC = 0; 
+
 /*
     BUS STATE : 
     0 : Error active
@@ -320,7 +321,14 @@ uint8_t receiveFrame (uint16_t* identifier, uint8_t* payload, uint8_t* payload_s
     uint8_t errorTransmitterFlag = 0;
     uint8_t errorReceiverFlag = 0;
 
-    readFrameOnBus(buffer, buffer_size, payload_size, &nbStuffedBits, &overloadFlag, &errorTransmitterFlag, &errorReceiverFlag);
+    while (readFrameOnBus(buffer, buffer_size, payload_size, &nbStuffedBits, &overloadFlag, &errorTransmitterFlag, &errorReceiverFlag)) {
+        printf("Error transmit on bus \n");
+        updateBusState(errorTransmitterFlag, errorReceiverFlag);
+        if (bus_state == 2) {
+            return 1;
+        }
+        /* AJOUTER LA GESTION DES OVERLOAD FRAMES */
+    }
     
     uint8_t buffer_out[44 + *payload_size];
     removeStuffedBits(buffer, buffer_out, 44+*payload_size+nbStuffedBits);
