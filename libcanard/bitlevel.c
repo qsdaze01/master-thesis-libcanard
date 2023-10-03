@@ -3,11 +3,12 @@
 #include "canard.h"
 #include <math.h>
 #include "funccanard.h"
+#include <time.h> 
 
 uint8_t temp_lock = 0; /* VARIABLE DE LOCK TEMPORAIRE EN ATTENDANT QUE LA COMMUNICATION MARCHE */
 uint8_t temp_bus = 1; /* VARIABLE DE BUS TEMPORAIRE EN ATTENDANT QUE LA COMMUNICATION MARCHE */
 uint64_t temp_count = 0; /* VARIABLE DE COMPTEUR TEMPORAIRE EN ATTENDANT QUE LA COMMUNICATION MARCHE */
-uint64_t temp_time_bit = 1000; /* VARIABLE DE TEMPS BIT TEMPORAIRE EN ATTENDANT QUE LA COMMUNICATION MARCHE */
+clock_t temp_time_bit = 10000; /* VARIABLE DE TEMPS BIT TEMPORAIRE EN ATTENDANT QUE LA COMMUNICATION MARCHE */
 
 uint8_t bufferIdle[10];
 uint8_t bufferStart[11];
@@ -37,17 +38,17 @@ uint8_t isBusIdle() {
     return 0;
 }
 
-uint8_t endTimeBit() {
-    temp_count++; /*A REMPLACER PAR LA FONCTION D'OPTENTION DU TEMPS*/
-    if (temp_count < temp_time_bit) {
+uint8_t endTimeBit(clock_t startTimeBit) {
+    clock_t time = clock();
+    if (time - startTimeBit < temp_time_bit) {
         return 1;
     }
     return 0;
 }
 
-uint8_t endHalfBit() {
-    temp_count++; /*A REMPLACER PAR LA FONCTION D'OPTENTION DU TEMPS*/
-    if (temp_count < temp_time_bit/2) {
+uint8_t endHalfBit(clock_t startTimeBit) {
+    clock_t time = clock();
+    if (time - startTimeBit < temp_time_bit/2) {
         return 1;
     }
     return 0;
@@ -113,12 +114,12 @@ uint8_t testErrorFixBits (uint8_t* buffer, int buffer_size, int index, uint8_t n
             return 1;
         }
     }
-    if (index == 34 + nbStuffedBits - diffStuffedBits + 8*payload_size) {
+    if (index == 34 + nbStuffedBits - diffStuffedBits + payload_size) {
         if (buffer[index] == 0) {
             return 1;
         }
     }
-    if (index == 36 + nbStuffedBits - diffStuffedBits + 8*payload_size) {
+    if (index == 36 + nbStuffedBits - diffStuffedBits + payload_size) {
         if (buffer[index] == 0) {
             return 0;
         }
@@ -160,6 +161,7 @@ uint8_t arbitrationLost (uint8_t* buffer, int buffer_size, int index) {
             return 1;
         }
         temp_lock = 0;
+        isBusRead = 1;
     }
     return 0;
 }
@@ -180,16 +182,14 @@ uint8_t testCorrectBit (uint8_t* buffer, int buffer_size, int index) {
     return 0;
 }
 
-uint8_t testCRC (uint8_t* buffer, int buffer_size, int index) {
+uint8_t testCRC (uint8_t* buffer, int buffer_size, int index, uint8_t nbStuffedBits, uint8_t payload_size) {
     uint8_t buffer_out[index+1];
-    removeStuffedBits(buffer, buffer_out, index);
-    uint8_t payload_size = (buffer_size - 44)/8;
-    
+    removeStuffedBits(buffer, buffer_out, index-nbStuffedBits);    
     uint16_t CRC_computed = computeCRC(payload_size, buffer_out);
 
     uint16_t CRC_received = 0;
     for (int i = 0; i < 15; i++){
-        CRC_received += buffer_out[19 + 8*payload_size + i]*pow(2,14-i);
+        CRC_received += buffer_out[19 + payload_size + i]*pow(2,14-i);
     }
 
     if (!(CRC_computed == CRC_received || CRC_computed - pow(2,15) == CRC_received)) {
@@ -203,19 +203,22 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
     int index = 0;
     uint8_t nbStuffedBits = 0;
     uint8_t lastNbStuffedBits = 0;
+    clock_t startBit;
     for (int i = 0; i < 10; i++) {
         bufferIdle[i] = 0;
     }
 
     while(isBusIdle()) {
-        while (endTimeBit()) {
+        startBit = clock();
+        while (endTimeBit(startBit)) {
             continue;
         }
     }
-
+    printf("Idle phase passed \n");
     /* Arbitration */
     int limit_arbitration = 12;
     while (sendBit(buffer, buffer_size, index, limit_arbitration)) {
+        startBit = clock();
         lastNbStuffedBits = nbStuffedBits;
         nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
         limit_arbitration = 12 + nbStuffedBits;
@@ -231,44 +234,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             return 1;
         }
         index++;
-        while (endTimeBit()) {
-            continue;
-        }
-        uint8_t busAtOne = 0;
-        while (!busAtOne) {
-            if (temp_lock != 0) {
-                continue;
-            } 
-            temp_lock = 1;
-            temp_bus = 1;
-            temp_lock = 0;
-            busAtOne = 1;
-        }
-    }
-
-    /* Second Part */
-    int limit_second_part = 34 + payload_size*8 + nbStuffedBits;
-    while (sendBit(buffer, buffer_size, index, limit_second_part)) {
-        lastNbStuffedBits = nbStuffedBits;
-        nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
-        limit_second_part = 34 + payload_size*8 + nbStuffedBits;
-        if (testErrorFixBits (buffer, buffer_size, index, nbStuffedBits, nbStuffedBits-lastNbStuffedBits, payload_size)) {
-            *errorTransmitterFlag = 1;
-            return 1;
-        }
-        if (testConsecutiveBits (buffer, buffer_size, index)) {
-            *errorReceiverFlag = 1;
-            return 1;
-        }
-        while (endHalfBit()){
-            continue;
-        }
-        if (testCorrectBit (buffer, buffer_size, index)) {
-            *errorTransmitterFlag = 1;
-            return 1;
-        }
-        index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -283,18 +249,15 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
         }
     }
     
-    if (testCRC (buffer, buffer_size, index)) {
-        *errorTransmitterFlag = 8;
-        return 1;
-    }
+    printf("Arbitration passed : %d \n", index);
 
-    /* Third Part */
-    int limit_third_part = 36 + payload_size*8 + nbStuffedBits;
-    uint8_t ACK = 1; 
-    while (sendBit(buffer, buffer_size, index, limit_third_part)) {
+    /* Second Part */
+    int limit_second_part = 34 + payload_size + nbStuffedBits;
+    while (sendBit(buffer, buffer_size, index, limit_second_part)) {
+        startBit = clock();
         lastNbStuffedBits = nbStuffedBits;
         nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
-        limit_third_part = 36 + payload_size*8 + nbStuffedBits;
+        limit_second_part = 34 + payload_size + nbStuffedBits;
         if (testErrorFixBits (buffer, buffer_size, index, nbStuffedBits, nbStuffedBits-lastNbStuffedBits, payload_size)) {
             *errorTransmitterFlag = 1;
             return 1;
@@ -303,7 +266,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             *errorReceiverFlag = 1;
             return 1;
         }
-        while (endHalfBit()){
+        while (endHalfBit(startBit)){
             continue;
         }
         if (testCorrectBit (buffer, buffer_size, index)) {
@@ -311,7 +274,55 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             return 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
+            continue;
+        }
+        uint8_t busAtOne = 0;
+        while (!busAtOne) {
+            if (temp_lock != 0) {
+                continue;
+            } 
+            temp_lock = 1;
+            temp_bus = 1;
+            temp_lock = 0;
+            busAtOne = 1;
+        }
+    }
+    
+    printf("Second Part passed : %d %d \n", index, nbStuffedBits);
+
+    if (testCRC (buffer, buffer_size, index, nbStuffedBits, payload_size)) {
+        *errorTransmitterFlag = 8;
+        return 1;
+    }
+
+    printf("CRC passed \n");
+
+    /* Third Part */
+    int limit_third_part = 36 + payload_size + nbStuffedBits;
+    uint8_t ACK = 1; 
+    while (sendBit(buffer, buffer_size, index, limit_third_part)) {
+        startBit = clock();
+        lastNbStuffedBits = nbStuffedBits;
+        nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
+        limit_third_part = 36 + payload_size + nbStuffedBits;
+        if (testErrorFixBits (buffer, buffer_size, index, nbStuffedBits, nbStuffedBits-lastNbStuffedBits, payload_size)) {
+            *errorTransmitterFlag = 1;
+            return 1;
+        }
+        if (testConsecutiveBits (buffer, buffer_size, index)) {
+            *errorReceiverFlag = 1;
+            return 1;
+        }
+        while (endHalfBit(startBit)){
+            continue;
+        }
+        if (testCorrectBit (buffer, buffer_size, index)) {
+            *errorTransmitterFlag = 1;
+            return 1;
+        }
+        index++;
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -326,17 +337,24 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             busAtOne = 1;
         }
     }
+    printf("Third part passed : %d \n", index);
     
+    /* A ENLEVER DECOMMENTER LORS D'UNE COMMUNICATION */
+    /*
     if (ACK != 0) {
         *errorTransmitterFlag = 8;
         return 1;
     }
+    */
 
-    int limit_last_part = 37 + payload_size*8 + nbStuffedBits;
+    printf("ACK OK \n");
+
+    int limit_last_part = 37 + payload_size + nbStuffedBits;
     while (sendBit(buffer, buffer_size, index, limit_last_part)) {
+        startBit = clock();
         lastNbStuffedBits = nbStuffedBits;
         nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
-        limit_last_part = 37 + payload_size*8 + nbStuffedBits;
+        limit_last_part = 37 + payload_size + nbStuffedBits;
         if (testErrorFixBits (buffer, buffer_size, index, nbStuffedBits, nbStuffedBits-lastNbStuffedBits, payload_size)) {
             *errorTransmitterFlag = 1;
             return 1;
@@ -345,7 +363,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             *errorReceiverFlag = 1;
             return 1;
         }
-        while (endHalfBit()){
+        while (endHalfBit(startBit)){
             continue;
         }
         if (testCorrectBit (buffer, buffer_size, index)) {
@@ -353,7 +371,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             return 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -372,6 +390,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
     uint8_t isBusWritten;
     uint8_t correctBit;
     for (int i = 0; i < 7; i++) {
+        startBit = clock();
         isBusWritten = 0;
         while(!isBusWritten) {
             if (temp_lock != 0) {
@@ -382,7 +401,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             temp_lock = 0;
             isBusWritten = 1;
         }
-        while (endHalfBit()){
+        while (endHalfBit(startBit)){
             continue;
         }
         correctBit = 0;
@@ -398,7 +417,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             temp_lock = 0;
             correctBit = 1;
         }
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -415,6 +434,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
 
     /* Interframe */
     for (int i = 0; i < 3; i++) {
+        startBit = clock();
         isBusWritten = 0;
         while(!isBusWritten) {
             if (temp_lock != 0) {
@@ -425,7 +445,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             temp_lock = 0;
             isBusWritten = 1;
         }
-        while (endHalfBit()){
+        while (endHalfBit(startBit)){
             continue;
         }
         correctBit = 0;
@@ -441,7 +461,7 @@ uint8_t transmitOnBus (uint8_t* buffer, int buffer_size, uint8_t payload_size, u
             temp_lock = 0;
             correctBit = 1;
         }
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -512,9 +532,9 @@ uint8_t computeDLC() {
     return DLC;
 }
 
-uint8_t receiveBit(uint8_t* buffer, int buffer_size, int index, int limit) {
+uint8_t receiveBit(uint8_t* buffer, int buffer_size, int index, int limit, clock_t startBit) {
     if (index < limit) {
-        while (endHalfBit()){
+        while (endHalfBit(startBit)){
             continue;
         }
         uint8_t received = 0;
@@ -533,9 +553,9 @@ uint8_t receiveBit(uint8_t* buffer, int buffer_size, int index, int limit) {
     }
 }
 
-uint8_t sendACK(uint8_t* buffer, int buffer_size, int index, int limit) {
+uint8_t sendACK(uint8_t* buffer, int buffer_size, int index, int limit, clock_t startBit) {
     if (index < limit) {
-        while (endHalfBit()){
+        while (endHalfBit(startBit)){
             continue;
         }
         uint8_t sent = 0;
@@ -559,19 +579,29 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
     int index = 0;
     *nbStuffedBits = 0;
     uint8_t lastNbStuffedBits = 0;
+    clock_t startBit;
+    uint8_t firstLoop;
+
     for (int i = 0; i < 11; i++) {
         bufferStart[i] = 0;
     }
     
     while(readStartFrame()) {
-        while (endTimeBit()) {
+        startBit = clock();
+        while (endTimeBit(startBit)) {
             continue;
         }
     }
 
     /* First part */
     int limit_first_part = 15 + *nbStuffedBits;
-    while (receiveBit(buffer, buffer_size, index, limit_first_part)) {
+    firstLoop = 1;
+    startBit = clock();
+    while (receiveBit(buffer, buffer_size, index, limit_first_part, startBit)) {
+        if (firstLoop) {
+            firstLoop = 0;
+            startBit = clock();
+        }
         lastNbStuffedBits = *nbStuffedBits;
         *nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
         limit_first_part = 15 + *nbStuffedBits;
@@ -584,7 +614,7 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
             return 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -605,7 +635,13 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
 
     /* Data Length Code (DLC) */
     int limit_DLC = 19 + *nbStuffedBits;
-    while (receiveBit(buffer, buffer_size, index, limit_DLC)) {
+    firstLoop = 1;
+    startBit = clock();
+    while (receiveBit(buffer, buffer_size, index, limit_DLC, startBit)) {
+        if (firstLoop) {
+            firstLoop = 0;
+            startBit = clock();
+        }
         lastNbStuffedBits = *nbStuffedBits;
         *nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
         limit_DLC = 19 + *nbStuffedBits;
@@ -619,7 +655,7 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
         }
         getDLC(buffer, buffer_size, index, *nbStuffedBits, *nbStuffedBits-lastNbStuffedBits);
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -634,14 +670,20 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
         }
     }
     
-    *payload_size = computeDLC();
+    *payload_size = 8*computeDLC();
 
     /* Data + CRC */
-    int limit_second_part = 34 + *payload_size*8 + *nbStuffedBits;
-    while (receiveBit(buffer, buffer_size, index, limit_second_part)) {
+    int limit_second_part = 34 + *payload_size + *nbStuffedBits;
+    firstLoop = 1;
+    startBit = clock();
+    while (receiveBit(buffer, buffer_size, index, limit_second_part, startBit)) {
+        if (firstLoop) {
+            firstLoop = 0;
+            startBit = clock();
+        }
         lastNbStuffedBits = *nbStuffedBits;
         *nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
-        limit_second_part = 34 + *payload_size*8 + *nbStuffedBits;
+        limit_second_part = 34 + *payload_size + *nbStuffedBits;
         if (testErrorFixBits (buffer, buffer_size, index, *nbStuffedBits, *nbStuffedBits-lastNbStuffedBits, *payload_size)) {
             *errorReceiverFlag = 1;
             return 1;
@@ -651,7 +693,7 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
             return 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -666,17 +708,23 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
         }
     }
 
-    if (testCRC (buffer, buffer_size, index)) {
+    if (testCRC (buffer, buffer_size, index, *nbStuffedBits, *payload_size)) {
         *errorTransmitterFlag = 8;
         return 1;
     }
 
     /* CRC delimiter */
-    int limit_CRC_delimiter = 35 + *payload_size*8 + *nbStuffedBits;
-    while (receiveBit(buffer, buffer_size, index, limit_CRC_delimiter)) {
+    int limit_CRC_delimiter = 35 + *payload_size + *nbStuffedBits;
+    firstLoop = 1;
+    startBit = clock();
+    while (receiveBit(buffer, buffer_size, index, limit_CRC_delimiter, startBit)) {
+        if (firstLoop) {
+            firstLoop = 0;
+            startBit = clock();
+        }
         lastNbStuffedBits = *nbStuffedBits;
         *nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
-        limit_CRC_delimiter = 35 + *payload_size*8 + *nbStuffedBits;
+        limit_CRC_delimiter = 35 + *payload_size + *nbStuffedBits;
         if (testErrorFixBits (buffer, buffer_size, index, *nbStuffedBits, *nbStuffedBits-lastNbStuffedBits, *payload_size)) {
             *errorReceiverFlag = 1;
             return 1;
@@ -686,7 +734,7 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
             return 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -702,11 +750,12 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
     }
 
     /* ACK */
-    int limit_ACK = 36 + *payload_size*8 + *nbStuffedBits;
-    while (sendACK(buffer, buffer_size, index, limit_ACK)) {
+    int limit_ACK = 36 + *payload_size + *nbStuffedBits;
+    startBit = clock();
+    while (sendACK(buffer, buffer_size, index, limit_ACK, startBit)) {
         lastNbStuffedBits = *nbStuffedBits;
         *nbStuffedBits = nbStuffedBitsCount(buffer, buffer_size, index);
-        limit_ACK = 36 + *payload_size*8 + *nbStuffedBits;
+        limit_ACK = 36 + *payload_size + *nbStuffedBits;
         if (testErrorFixBits (buffer, buffer_size, index, *nbStuffedBits, *nbStuffedBits-lastNbStuffedBits, *payload_size)) {
             *errorReceiverFlag = 1;
             return 1;
@@ -716,7 +765,7 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
             return 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -734,7 +783,8 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
     /* ACK delimiter + EOF */
     uint8_t correctBit;
     for (int i = 0; i < 8; i++) {
-        while (endHalfBit()){
+        startBit = clock();
+        while (endHalfBit(startBit)){
             continue;
         }
         correctBit = 0;
@@ -751,7 +801,7 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
             correctBit = 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;
@@ -768,7 +818,8 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
 
     /* Interframe */
    for (int i = 0; i < 8; i++) {
-        while (endHalfBit()){
+        startBit = clock();
+        while (endHalfBit(startBit)){
             continue;
         }
         correctBit = 0;
@@ -785,7 +836,7 @@ uint8_t readFrameOnBus (uint8_t* buffer, int buffer_size, uint8_t* payload_size,
             correctBit = 1;
         }
         index++;
-        while (endTimeBit()) {
+        while (endTimeBit(startBit)) {
             continue;
         }
         uint8_t busAtOne = 0;

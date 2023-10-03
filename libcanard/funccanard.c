@@ -28,12 +28,12 @@ void memFree(CanardInstance* const canard, void* const pointer)
 }
 
 uint16_t computeCRC(int payload_size, uint8_t * buffer_frame) {
-    uint8_t byte_buffer[3 + payload_size];
-    for (int i = 0; i < 3 + payload_size; i++){
+    uint8_t byte_buffer[3 + payload_size/8];
+    for (int i = 0; i < 3 + payload_size/8; i++){
         byte_buffer[i] = 0;
     }
 
-    uint8_t start_frame_size = 19 + 8*payload_size;
+    uint8_t start_frame_size = 19 + payload_size;
     int temp = 0;
     for (int i = 0; i < start_frame_size; i++){
         if (i%8 == 0 && i != 0){
@@ -41,7 +41,7 @@ uint16_t computeCRC(int payload_size, uint8_t * buffer_frame) {
         }
         byte_buffer[temp] += buffer_frame[i]*pow(2,7-i%8);
     }
-    uint16_t CRC = crcAdd(0, 3 + payload_size, byte_buffer);
+    uint16_t CRC = crcAdd(0, 3 + payload_size/8, byte_buffer);
     return CRC;
 }
 
@@ -49,7 +49,7 @@ uint8_t insertStuffedBits (uint8_t* buffer_in, uint8_t* buffer_out, uint8_t payl
     uint8_t nb_stuffed_bits = 0;
     uint8_t count_successive_1 = 0;
     uint8_t count_successive_0 = 0;
-    for (int i = 0; i < 44 + 8*payload_size; i++) {
+    for (int i = 0; i < 44 + payload_size; i++) {
         if (buffer_in[i] == 0) {
             count_successive_1 = 0;
             count_successive_0++;
@@ -73,7 +73,7 @@ uint8_t insertStuffedBits (uint8_t* buffer_in, uint8_t* buffer_out, uint8_t payl
     return nb_stuffed_bits;
 }
 
-uint8_t removeStuffedBits(uint8_t* buffer_in, uint8_t* buffer_out, uint8_t buffer_size){
+uint8_t removeStuffedBits(uint8_t* buffer_in, uint8_t* buffer_out, int buffer_size){
     uint8_t nb_stuffed_bits = 0;
     uint8_t count_successive_1 = 0;
     uint8_t count_successive_0 = 0;
@@ -116,7 +116,7 @@ uint8_t removeStuffedBits(uint8_t* buffer_in, uint8_t* buffer_out, uint8_t buffe
     EOF : 7 bits Recessive
 */
 uint8_t serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, uint8_t RTR, uint8_t* buffer) {
-    uint8_t buffer_size = 44 + payload_size*8;
+    int buffer_size = 44 + payload_size;
     uint16_t CRC;
 
     // SOF
@@ -140,11 +140,11 @@ uint8_t serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, 
         buffer[18 - i] = bit;
     }
     //Data field
-    for (int j = 0; j < payload_size; j++) {
+    for (int j = 0; j < payload_size/8; j++) {
         for (int i = 8; i >= 0; i--) {
             uint16_t mask = 1 << i;
             uint8_t bit = (payload[j] & mask) ? 1 : 0;
-            buffer[19 + 8*payload_size - i - 8*j] = bit;
+            buffer[19 + payload_size - i - 8*j] = bit;
         }
     }
     //CRC
@@ -152,21 +152,21 @@ uint8_t serializeFrame(int payload_size, uint8_t* payload, uint16_t identifier, 
     for (int i = 14; i >= 0; i--) {
         uint16_t mask = 1 << i;
         uint8_t bit = (CRC & mask) ? 1 : 0;
-        buffer[33 + 8*payload_size - i] = bit;
+        buffer[33 + payload_size - i] = bit;
     }
     //DEL
-    buffer[34 + 8*payload_size] = 1;
+    buffer[34 + payload_size] = 1;
     //ACK
-    buffer[35 + 8*payload_size] = 1;
+    buffer[35 + payload_size] = 1;
     //DEL 
-    buffer[36 + 8*payload_size] = 1;
+    buffer[36 + payload_size] = 1;
     //EOF
     for (int i = 0; i < 7; i++){
-        buffer[37 + 8*payload_size + i] = 1;
+        buffer[37 + payload_size + i] = 1;
     }
     //Interframe space 
     for (int i = 0; i < 3; i++){
-        buffer[44 + 8*payload_size + i] = 1;
+        buffer[44 + payload_size + i] = 1;
     }
     return 0;
 }
@@ -234,18 +234,19 @@ uint8_t updateBusState (uint8_t errorTransmitterFlag, uint8_t errorReceiverFlag)
 
 uint8_t pleaseTransmit(CanardTxQueueItem* ti, CanardTransferMetadata transfer_metadata) {
     const uint8_t* payload_data = (const uint8_t*)ti->frame.payload;
-    uint8_t buffer_frame[44 + ti->frame.payload_size*8];
+    uint8_t buffer_frame[44 + ti->frame.payload_size];
 
     serializeFrame(ti->frame.payload_size, payload_data, transfer_metadata.port_id, 1, buffer_frame);
 
-    uint8_t buffer_stuffed[44 + ti->frame.payload_size*8 + 21];
+    uint8_t buffer_stuffed[44 + ti->frame.payload_size + 21];
     uint8_t stuffed_bits = insertStuffedBits(buffer_frame, buffer_stuffed, ti->frame.payload_size);
-    uint8_t frame_len = 44 + ti->frame.payload_size*8 + stuffed_bits;
-
+    int frame_len = 44 + ti->frame.payload_size + stuffed_bits;
     uint8_t overloadFlag = 0;
     uint8_t errorTransmitterFlag = 0;
     uint8_t errorReceiverFlag = 0;
+
     while (transmitOnBus(buffer_stuffed, frame_len, ti->frame.payload_size, &overloadFlag, &errorTransmitterFlag, &errorReceiverFlag) != 0) {
+        printf("Error transmit on bus \n");
         updateBusState(errorTransmitterFlag, errorReceiverFlag);
         if (bus_state == 2) {
             return 1;
@@ -297,7 +298,7 @@ uint8_t transmitFrame(CanardTxQueue queue, CanardInstance canard, uint8_t tx_dea
 
 uint8_t alignPayload(uint64_t data, uint8_t* payload, uint8_t payload_size) {
     int i = 0;
-    uint8_t temp_payload[payload_size*8];
+    uint8_t temp_payload[payload_size];
     while (data > 0) {
         temp_payload[i] = data%2;
         data = data/2;
@@ -321,11 +322,11 @@ uint8_t receiveFrame (uint16_t* identifier, uint8_t* payload, uint8_t* payload_s
 
     readFrameOnBus(buffer, buffer_size, payload_size, &nbStuffedBits, &overloadFlag, &errorTransmitterFlag, &errorReceiverFlag);
     
-    uint8_t buffer_out[44 + *payload_size*8];
-    removeStuffedBits(buffer, buffer_out, 44+*payload_size*8+nbStuffedBits);
+    uint8_t buffer_out[44 + *payload_size];
+    removeStuffedBits(buffer, buffer_out, 44+*payload_size+nbStuffedBits);
 
     uint64_t data;
-    deserializeFrame(buffer_out, identifier, 44 + *payload_size*8, &data);
+    deserializeFrame(buffer_out, identifier, 44 + *payload_size, &data);
 
     alignPayload(&data, payload, *payload_size);
 

@@ -2,46 +2,43 @@
 #include <stdlib.h>
 #include "libcanard/canard.h"
 #include "libcanard/funccanard.h"
-//#include "/opt/riscv/sysroot/usr/include/asm-generic/mman-common.h"
-//#include "/opt/riscv/sysroot/usr/include/asm-generic/mman.h"
-//#include <mman-common.h>
 
 //uint8_t lock __attribute__((section(".my_section1"), aligned(1))) = 24;
 //uint8_t bus __attribute__((section(".my_section2"), aligned(1))) = 23;
 
 int main() {
+    /*
+    uint8_t * lock = malloc(sizeof(1));
+    printf("%p \n", lock);
 
-    //uint8_t * lock = malloc(sizeof(1));
-    //printf("%p \n", lock);
+    uint8_t * bus = malloc(sizeof(1));
+    printf("%p \n", bus);
 
-    //uint8_t * bus = malloc(sizeof(1));
-    //printf("%p \n", bus);
+    int *lock = mmap (address_lock, 1, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS, 0, 0);
 
-    //int *lock = mmap (address_lock, 1, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS, 0, 0);
-
-    /*if (lock == MAP_FAILED) {
+    if (lock == MAP_FAILED) {
         perror("Error : mapping lock");
         exit(1);
-    }*/
+    }
 
-    //int *bus = mmap (address_bus, 1, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS, 0, 0);
+    int *bus = mmap (address_bus, 1, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS, 0, 0);
 
-    /*if (bus == MAP_FAILED) {
+    if (bus == MAP_FAILED) {
         perror("Error : mapping bus");
         exit(1);
-    }*/
+    }
 
-    //lock = 26;
-    //bus = 47;
-
-    /*
+    lock = 26;
+    bus = 47;
+    
+    
     uint8_t buffer[44];
     serializeFrame(0, NULL, 11, 1, buffer);
     uint16_t identifer = 0;
     uint64_t data = 0;
     deserializeFrame(buffer, &identifer, 44, &data);
     */
-    /*
+    
     CanardInstance canard = canardInit(&memAllocate, &memFree);
     canard.node_id = 42;                        // Defaults to anonymous; can be set up later at any point.
 
@@ -57,9 +54,9 @@ int main() {
 
     transmitFrame(queue, canard, tx_deadline_usec, &my_message_transfer_id, 1234, 48, payload);
 
-    char* payload2 = "Hello there";
+    //char* payload2 = "Hello there";
 
-    transmitFrame(queue, canard, tx_deadline_usec, &my_message_transfer_id, 1234, 11, payload2);
-    */
+    //transmitFrame(queue, canard, tx_deadline_usec, &my_message_transfer_id, 1234, 11, payload2);
+    
     return 0;
 }
