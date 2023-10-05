@@ -218,10 +218,10 @@ uint8_t errorStuffedBits(uint8_t* buffer, uint8_t buffer_size) {
 }
 
 uint8_t updateBusState (uint8_t errorTransmitterFlag, uint8_t errorReceiverFlag) {
-    if (bus_state == 0 && TEC >= 128 && REC >= 128) {
+    if (bus_state == 0 && (TEC >= 128 || REC >= 128)) {
         bus_state = 1;
     } 
-    if (bus_state == 1 && TEC < 128 && REC < 128) {
+    if (bus_state == 1 && (TEC < 128 || REC < 128)) {
         bus_state = 0;
     }
     if (bus_state == 1 && TEC > 256) {
